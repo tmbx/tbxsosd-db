@@ -1,0 +1,40 @@
+-- users.sql --- User creation. -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnouser(www-data) >>>
+create role "www-data" inherit login superuser in role teambox_admin;
+
+<<< isnouser(root) >>>
+create role root inherit login superuser in role teambox_admin;
+
+<<< isnouser(tbxsosd_slony) >>>
+-- For replications.
+create role tbxsosd_slony login superuser in role teambox_admin;
+
+-- Individual database.
+<<< isnouser(user_event) >>>
+create role user_event inherit login in role teambox_event;
+
+<<< isnouser(user_login) >>>
+create role user_login inherit login in role teambox_login;
+
+<<< isnouser(user_otut) >>>
+create role user_otut inherit login in role teambox_otut;
+
+<<< isnouser(user_privkeys) >>>
+create role user_privkeys inherit login in role teambox_privkeys;
+
+<<< isnouser(user_profiles) >>>
+create role user_profiles inherit login in role teambox_profiles;
+
+<<< isnouser(user_pubkeys) >>>
+create role user_pubkeys inherit login in role teambox_pubkeys;
+
+<<< isnouser(user_admin) >>>
+create role user_admin inherit login connection limit 6 in role teambox_admin;
+
+<<< isnouser(user_cleaner) >>>
+create role user_cleaner inherit login connection limit 1 in role teambox_cleaner;
+

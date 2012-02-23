@@ -1,0 +1,648 @@
+-- profiles_db_proc.sql --- User and group handling functions. -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+-- This makes sure that an user cannot have more than one main email
+-- address. 
+create or replace function trig_primary_email() returns trigger as '
+declare
+        n int;
+        pid bigint;
+begin
+        select into n count(email_id) from emails 
+               where user_id = NEW.user_id and is_primary = ''t'';
+        if n > 1 then
+           select into pid prof_id from profiles where
+                  profiles.user_id = NEW.user_id;
+           raise exception ''Profile % cannot have more than one primary address.'', pid;
+        end if;
+        return NEW;        
+end' language plpgsql;
+
+-- This makes sure that an email address cannot be associated to more
+-- than one key.
+create or replace function trig_email_keyid_unique() returns trigger as '
+declare 
+        n int;
+begin
+        select into n count(distinct key_id) from email_lookup
+               where email_address = NEW.email_address;
+        if n > 1 then
+           raise exception ''Email % cannot be linked to more than one key ID.'', NEW.email_address;
+        end if;
+        return NEW;
+end' language plpgsql;
+
+-- Protect the user from having too many primary addresses.
+<<< isnotrigger(check_primary_email, emails, update), isnotrigger(check_primary_email, emails, insert) >>>
+create trigger check_primary_email after update or insert on emails 
+       for each row execute procedure trig_primary_email();
+
+grant execute on function trig_primary_email() to teambox_admin;
+<<< end() >>>
+
+<<< isnotrigger(check_email_keys, emails, update), isnotrigger(check_email_keys, emails, insert) >>>
+create trigger check_email_keys after update or insert on emails
+       for each row execute procedure trig_email_keyid_unique();
+
+grant execute on function trig_email_keyid_unique() to teambox_admin;
+<<< end() >>>
+
+--
+create or replace function set_key_status(bigint, int) returns void as '
+declare
+        kid alias for $1;
+        s alias for $2;
+        dummy int;
+begin
+        select 1 into dummy from profiles where key_id = kid;
+        if not found then
+           raise exception ''Key ID % not found'', kid;
+        end if;
+        update profiles set status = s where key_id = kid;
+        return;
+end' language plpgsql;
+
+grant execute on function set_key_status(bigint, int) to teambox_admin;
+
+--
+create or replace function get_prof_status(bigint) returns int as '
+declare
+        pid alias for $1;
+        s int;
+        dummy int;
+begin
+        select 1 into dummy from profiles where prof_id = pid;
+        if not found then
+           raise exception ''Profile % not found'', pid;
+        end if;
+        select into s status from profiles where prof_id = pid;
+        if s is null then
+           return 0;
+        else
+           return s;
+        end if;
+end' language plpgsql;
+
+grant execute on function get_prof_status(bigint) to teambox_profiles;
+
+create or replace function get_key_status(bigint) returns int as '
+declare 
+        kid alias for $1;
+        s int;
+        dummy int;
+begin
+        select 1 into dummy from profiles where key_id = kid;
+        if not found then
+           raise exception ''Key ID % not found'', kid;
+        end if;
+        select into s status from profiles where key_id = kid;
+        if s is null then
+           return 0;
+        else
+           return s;
+        end if;
+end' language plpgsql;
+
+grant execute on function get_key_status(bigint) to teambox_profiles;
+
+-- Return the primary email address of the user.
+create or replace function get_primary_email_address(bigint) returns text as '
+declare
+        pid alias for $1;
+        ea  text;
+begin
+        select into ea email_address from emails 
+               inner join user_profiles
+                     on user_profiles.user_id = emails.user_id
+               where prof_id = pid and is_primary = ''t'';
+        return ea;
+end' language plpgsql;
+
+grant execute on function get_primary_email_address(bigint) to teambox_profiles;
+
+-- Get a profile name suitable to be set as the owner of a key.
+create or replace function get_profile_name(bigint) returns text as '
+declare
+        pid alias for $1;
+        pt text;
+        nm text;
+begin
+        select into pt prof_type from profiles where prof_id = pid;                
+        if not found then
+                raise exception ''Profile % not found'', pid;
+        end if;
+        if pt = ''U'' then
+                -- Handle empty first name
+                select into nm trim(first_name || '' '' || last_name) as Name from user_profiles
+                where prof_id = pid;
+        else
+                select into nm group_name as Name from group_profiles
+                where prof_id = pid;
+        end if;
+        return nm;
+end' language plpgsql;
+
+grant execute on function get_profile_name(bigint) to teambox_admin;
+
+-- Function to add an organization in the database.
+create or replace function add_org(varchar) returns bigint as '
+declare
+        n alias for $1;
+        oid bigint;
+begin
+        insert into organization (name) values (n);        
+        select into oid last_value from org_id_seq; 
+        return oid;
+end' language plpgsql;
+
+grant execute on function add_org(varchar) to teambox_admin;
+
+-- Remove an email address or email part from a profile.
+create or replace function del_email(bigint, varchar) returns void as '
+declare
+        pid alias for $1;
+        em  alias for $2;
+        did bigint;
+        pt  text;
+        dummy text;
+begin
+        select into pt prof_type from profiles where prof_id = pid;
+
+        if not found then
+                raise exception ''Profile % not found'', pid;
+        end if;
+
+        if pt = ''U'' then
+                select into dummy 1 from emails where email_address = em;
+                if not found then
+                        raise exception ''Email address % not found'', em;
+                end if;
+                delete from emails where email_address = em;                                
+        else
+                select into dummy 1 from email_parts where email_address = em;                
+                if not found then
+                        raise exception ''Email address % not found'', em;
+                end if;
+                delete from email_parts where email_part = em;
+        end if;
+
+        return;        
+end' language plpgsql;
+
+grant execute on function del_email(bigint, varchar) to teambox_admin;
+
+create or replace function add_primary_email(bigint, varchar) returns void as '
+declare 
+        pid alias for $1;
+        em  alias for $2;
+        mid bigint;
+        gid bigint;
+        uid bigint;
+        pt  text;
+begin
+        select into pt prof_type from profiles where prof_id = pid;        
+
+        if not found then 
+                raise exception ''Profile % not found'', pid;
+        end if;
+
+        if pt = ''U'' then
+           select into uid user_id from profiles 
+                  where prof_id = pid;
+           insert into emails (user_id, email_address, status, is_primary)
+                  values (uid, em, ''A'', ''t'');
+        else
+           select into gid group_id from profiles 
+                  where prof_id = pid;
+           insert into email_parts (email_part, group_id)
+                  values (em, gid);
+        end if;
+
+        return;
+end' language plpgsql;
+
+grant execute on function add_primary_email(bigint, varchar) to teambox_admin;
+
+-- Add an email address to a profile.  It can be an email part or an full
+-- email address, depending on the profile ID.
+create or replace function add_email(bigint, varchar) returns void as '
+declare 
+        pid alias for $1;
+        em  alias for $2;
+        mid bigint;
+        gid bigint;
+        uid bigint;
+        pt  text;
+begin
+        select into pt prof_type from profiles where prof_id = pid;        
+
+        if not found then 
+                raise exception ''Profile % not found'', pid;
+        end if;
+
+        if pt = ''U'' then
+           select into uid user_id from profiles 
+                  where prof_id = pid;
+           insert into emails (user_id, email_address, status, is_primary)
+                  values (uid, em, ''A'', ''f'');
+        else
+           select into gid group_id from profiles 
+                  where prof_id = pid;
+           insert into email_parts (email_part, group_id)
+                  values (em, gid);
+        end if;
+
+        return;
+end' language plpgsql;
+
+grant execute on function add_email(bigint, varchar) to teambox_admin;
+
+create or replace function unset_key(bigint) returns void as '
+declare
+        pid alias for $1;
+        dummy int;
+begin
+        select into dummy 1 from profiles where prof_id = pid;
+        if not found then
+                raise exception ''Profile %s not found'', pid;
+        end if;
+        update profiles set key_id = null where prof_id = pid;
+        return;
+end' language plpgsql;
+
+grant execute on function unset_key(bigint) to teambox_admin;
+
+-- Set a key to a profile.
+create or replace function set_key(bigint, bigint) returns void as '
+declare
+        pid alias for $1;
+        kid alias for $2;
+        dummy int;
+begin
+        select into dummy 1 from profiles where prof_id = pid;
+        if not found then
+                raise exception ''Profile % not found'', pid;
+        end if;
+        update profiles set key_id = kid where prof_id = pid;
+        return;
+end' language plpgsql;
+
+grant execute on function set_key(bigint, bigint) to teambox_admin;
+
+-- Return the list of email address for a person.
+create or replace function email_ls(bigint) returns setof varchar as '
+declare
+        pid alias for $1;
+        uid bigint;
+        gid bigint;
+        pt  text;
+        ls  record;
+begin
+        select into pt prof_type from profiles where prof_id = pid;
+
+        if not found then
+                raise exception ''Profile % not found'', pid;
+        end if;
+
+        if pt = ''U'' then
+                for ls in select email_address as i, is_primary as is_p from emails 
+                    inner join user_profiles 
+                          on user_profiles.user_id = emails.user_id
+                    where user_profiles.prof_id = pid loop
+                    if ls.is_p = ''t'' then
+                        return next ls.i||'' *'';
+                    else
+                        return next ls.i;
+                    end if;
+                end loop;
+        else
+                select into gid group_id from profiles where prof_id = pid;                
+                for ls in select email_part as i from email_parts where group_id = gid loop
+                        return next ls.i;
+                end loop;
+        end if;
+
+        return;
+end' language plpgsql;
+
+grant execute on function email_ls(bigint) to teambox_admin;
+
+-- Function to add a group profile in the database.
+create or replace function add_group_profile(bigint, varchar) returns bigint as '
+declare
+        oid alias for $1;
+        nm  alias for $2;
+        gid bigint;
+        pid bigint;
+        dummy int;
+begin
+        select into dummy 1 from organization where org_id = oid;
+        
+        if not found then
+                raise exception ''Organization % not found'', oid;
+        end if;
+
+        insert into profiles (org_id, prof_type) values (oid, ''G'');
+        select into pid last_value from prof_id_seq;
+        insert into group_profiles (group_name, status, prof_id) values (nm, ''A'', pid);
+        select into gid last_value from group_id_seq;
+        update profiles set group_id = gid where prof_id = pid;
+
+        return pid; 
+end' language plpgsql;
+
+grant execute on function add_group_profile(bigint, varchar) to teambox_admin;
+
+
+-- Function to add a ldap group in the database.
+create or replace function add_ldap_group(bigint, varchar) returns bigint as '
+declare
+        gid alias for $1;
+        dn  alias for $2;
+        pid bigint;
+        dummy int;
+begin
+        select into dummy 1 from group_profiles where group_id = gid;
+        
+        if not found then
+                raise exception ''Group % not found'', gid;
+        end if;
+
+        insert into ldap_groups (group_id, group_dn) values (gid, dn);
+        select into pid last_value from ldap_group_id_seq;
+
+        return pid; 
+end' language plpgsql;
+
+grant execute on function add_ldap_group(bigint, varchar) to teambox_admin;
+
+
+-- Remove an ldap group from the database.
+create or replace function del_ldap_group(bigint) returns void as '
+declare
+        lgid alias for $1;
+        dummy int;
+begin
+        select into dummy 1 from ldap_groups where ldap_group_id = lgid;       
+        if not found then
+                raise exception ''LDAP group % not found'', lgid;
+        end if;
+
+        delete from ldap_groups where ldap_group_id = lgid;                
+        return;
+end' language plpgsql;
+
+grant execute on function del_ldap_group(bigint) to teambox_admin;
+
+
+-- Function to add an user profile in the database.
+create or replace function add_user_profile(bigint, varchar, varchar) returns bigint as '
+declare
+        oid alias for $1;
+        fn  alias for $2;
+        ln  alias for $3;
+        uid bigint;
+        pid bigint;
+        dummy int;
+begin
+        select into dummy 1 from organization where org_id = oid;        
+        if not found then
+                raise exception ''Organization % not found'', oid;
+        end if;
+        insert into profiles (org_id, prof_type) values (oid, ''U'');
+        select into pid last_value from prof_id_seq;
+
+        insert into user_profiles (first_name, last_name, status, prof_id)
+               values (fn, ln, ''A'', pid);
+        select into uid last_value from user_id_seq;
+
+        update profiles set user_id = uid where prof_id = pid;
+        return pid;
+end' language plpgsql;
+
+grant execute on function add_user_profile(bigint, varchar, varchar) to teambox_admin;
+
+-- Remove an user profile from the database.
+create or replace function del_profile(bigint) returns void as '
+declare
+        pid alias for $1;
+        uid bigint;
+        gid bigint;
+        dummy int;
+        pt text;
+begin
+        select into pt prof_type from profiles where prof_id = pid;       
+        if not found then
+                raise exception ''Profile % not found'', pid;
+        end if;
+        if pt = ''U'' then
+                select into uid user_id from user_profiles where prof_id = pid;
+                delete from emails where user_id = uid;        
+                delete from user_profiles where user_id = uid;
+                delete from profiles      where prof_id = pid;               
+        else
+                select into gid group_id from group_profiles where prof_id = pid;
+                delete from email_parts where group_id = gid;
+                delete from ldap_groups where group_id = gid;
+                delete from group_profiles where group_id = gid;
+                delete from profiles where prof_id = pid;                
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function del_profile(bigint) to teambox_admin;
+
+-- Remove an organization from the database.
+create or replace function del_org(bigint) returns void as '
+declare
+        dummy int;
+        oi alias for $1;
+begin
+        perform 1 from organization where org_id = oi;
+        if not found then
+           raise exception ''Organization % not found'', oi;
+        end if;
+        delete from organization where org_id = oi;
+        return;
+end' language plpgsql;
+
+grant execute on function del_org(bigint) to teambox_admin;
+
+-- Function to check whether an user is allowed to decrypt a message.
+-- A space delimited string is passed in email list and each token is
+-- searched in the database given the list of user-id.  It is
+-- important that the comparison of the emails address be
+-- case-insensitive.  This is the why of the use of "ilike".
+create or replace function email_is_allowed(bigint, varchar) returns varchar as '
+declare 
+        pid alias for $1;
+        email_list alias for $2;
+        email text;
+        n     integer;
+        m     varchar;
+begin
+        n := 1;
+        loop
+                email := split_part(email_list, '' '', n);              
+
+                if email = '''' then
+                   return '''';
+                end if;
+
+                select into m email_address from emails
+                       inner join user_profiles 
+                             on user_profiles.user_id = emails.user_id
+                       where user_profiles.prof_id = pid and email_address ilike email;
+
+                if found then
+                   return m;
+                end if;
+
+                n := n + 1;
+        end loop;
+end' language plpgsql;
+
+grant execute on function email_is_allowed(bigint, varchar) to teambox_profiles;
+
+--
+<<< isnotype(pid_kid) >>>
+create type pid_kid as (
+       pid bigint,
+       kid bigint
+);
+<<< end() >>>
+
+-- Functions to search for an email (or a part of it in case of a group)
+-- and returns the key_id or null if nothing is found.
+create or replace function email_search(varchar) returns pid_kid as '
+declare
+        email alias for $1;
+        pid bigint;
+        kid bigint;
+        email_domain text;
+        c pid_kid;
+begin        
+        -- Lookup for the full email address first.
+        for c in select prof_id, key_id from email_lookup where email_address ilike email loop
+            exit;
+        end loop;
+
+        -- Return the key id for the full address if found.
+        if c.kid is not null then
+           return c;
+        end if;
+        
+        -- If not found, remove the part to the left of the email.
+        email_domain := substring(email from position(''@'' in email) + 1);
+
+        -- ... and remove one part of the domain until we find a TLD.
+        loop
+                for c in select prof_id, key_id from email_lookup 
+                                where email_address ilike email_domain loop
+                end loop;
+        
+                if c.kid is not null then
+                   return c;
+                end if; 
+                
+                -- Remove what is to the left of the next dot.
+                email_domain := substring(email_domain from position(''.'' in email_domain) + 1);
+                if position(''.'' in email_domain) = 0 then
+                   c.kid = 0;
+                   c.pid = 0;
+                   return c;
+                end if;
+        end loop;
+end' language plpgsql;
+
+grant execute on function email_search(varchar) to teambox_profiles;
+
+create or replace function get_org_data_from_prof_id(bigint) returns organization as '
+declare
+        pid alias for $1;
+        oid bigint;
+        r organization%rowtype;
+begin
+        select into oid org_id from profiles where prof_id = pid;
+        if not found then
+           raise exception ''Profile % not found'', pid;
+        end if;
+        select into r * from organization where org_id = oid;
+        return r;
+end 'language plpgsql;
+
+grant execute on function get_org_data_from_prof_id(bigint) to teambox_profiles;
+
+create or replace function get_org_data_from_kdn(varchar) returns organization as '
+declare
+        kdn alias for $1;
+        r organization%rowtype;
+begin
+        perform * from organization where name = kdn;
+        if not found then
+           raise exception ''Organization % not found'', kdn;
+        end if;
+        select into r * from organization where name = kdn;
+        return r;
+end' language plpgsql;
+
+grant execute on function get_org_data_from_kdn(varchar) to teambox_profiles;
+
+create or replace function set_org_license(varchar, varchar) returns void as '
+declare
+        kdn alias for $1;
+        lic alias for $2;
+begin
+        perform * from organization where name = kdn;
+        if not found then
+           raise exception ''Organization % not found'', kdn;
+        end if;
+        update organization set license = lic where name = kdn;
+        return;
+end' language plpgsql;
+
+grant execute on function set_org_license(varchar, varchar) to teambox_profiles;
+
+-- function to set organization forward_to (for archives?)
+create or replace function set_org_forward_to(bigint, varchar) returns void as '
+declare
+        oid alias for $1;
+        fto alias for $2;
+        dummy int;
+		fto2 varchar;
+begin
+        select 1 into dummy from organization where org_id = oid;
+        if not found then
+           raise exception ''Organization % not found'', oid;
+        end if;
+		fto2 = fto;
+		if fto2 = '''' then
+		  fto2 = NULL;
+		end if;
+        update organization set forward_to = fto2 where org_id = oid;
+        return;
+end' language plpgsql;
+
+grant execute on function set_org_forward_to(bigint, varchar) to teambox;
+
+create or replace function set_org_status(bigint, int) returns void as '
+declare
+        oid alias for $1;
+        os  alias for $2;
+begin
+        perform * from organization where org_id = oid;
+        if not found then
+           raise exception ''Organization % not found'', oid;
+        end if;
+        if os = null then
+           update organization set status = null where org_id = oid;
+        else
+           update organization set status = os where org_id = oid;
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function set_org_status(bigint, int) to teambox;
+

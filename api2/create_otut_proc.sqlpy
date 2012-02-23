@@ -1,0 +1,160 @@
+-- otut_db_kos_proc.sql --- OTUT handling functions -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+-- Store an OTUT ticket in the database, checking if the ticket
+-- that is received makes sense timestamp-wise.
+create or replace function otut_store_ticket(bigint, timestamp) returns void as '
+declare
+        mid   alias for $1;
+        ts    alias for $2;
+        t     timestamp;
+        dummy int;
+begin
+        -- Look for a time value for a specific member ID.
+        select into t time from ticket_cache where member_id = mid;
+        -- If nothing was found for the demanded member ID, we add it
+        -- to the DB and go no further.
+        if not found then
+                insert into ticket_cache values (mid, ts);
+        else
+                -- Check if the new ticket timestamp is over the old time - 10 minutes.
+                if ts > t - interval ''10 minute'' then
+                        -- Store the new timestamp for the member ID.
+                        update ticket_cache set time = ts where member_id = mid;
+                else    
+                        raise exception ''Invalid timestamp for OTUT request: %'', ts;
+                end if;
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function otut_store_ticket(bigint, timestamp) to teambox_otut;
+
+-- Remove the OTUT from the db, thus preventing its later use.
+create or replace function otut_succeed(bytea) returns otut_data as '
+declare
+        o  alias for $1;
+        r  record;
+        dat otut_data;
+begin
+        -- Delete the OTUT from the DB.
+        select into r rem_usage, rem_attempts from otuts where otut = o;
+        if not found then
+                raise exception ''OTUT not found'';
+        else
+                r.rem_usage := r.rem_usage - 1;
+                if r.rem_usage = 0 then
+                        delete from otuts where otut = o;
+                else
+                        update otuts set rem_usage = r.rem_usage where otut = o;
+                end if;
+        end if;
+        dat.rem_usage := r.rem_usage;
+        dat.rem_attempts := r.rem_attempts;
+        return dat;
+end' language plpgsql;
+
+grant execute on function otut_succeed(bytea) to teambox_otut;
+
+-- Pull an OTUT string for usage.  
+create or replace function otut_login(bytea) returns bigint as '
+declare
+        o alias for $1;
+        m bigint;
+begin
+        -- Check if the OTUT exists.
+        select into m mid from otuts where otut = o;
+        if not found then
+                return 0;
+        end if;
+        return m;
+end' language plpgsql;
+
+grant execute on function otut_login(bytea) to teambox_otut;
+
+-- Increase the fail count of an OTUT, remove it from the db if the
+-- fail count reaches the maximum threshold.
+create or replace function otut_fail(bytea) returns otut_data as '
+declare
+        o  alias for $1;
+        r  record;
+        dat otut_data;
+begin
+        -- Get the otut attempt count in the DB.
+        select into r rem_attempts, rem_usage from otuts where otut = o;
+        if not found then
+                raise exception ''OTUT not found'';
+        else
+                -- If the attempt count has reached the threshold, 
+                -- erase the otut from the db.
+                r.rem_attempts := r.rem_attempts - 1;
+                if r.rem_attempts = 0 then
+                        delete from otuts where otut = o;
+                -- Otherwise increase the attempt count
+                else
+                        update otuts set rem_attempts = r.rem_attempts where otut = o;
+                end if; 
+        end if;       
+        dat.rem_usage := r.rem_usage;
+        dat.rem_attempts := r.rem_attempts;
+        return dat;         
+end' language plpgsql;
+
+grant execute on function otut_fail(bytea) to teambox_otut;
+
+-- This is just for testing the otut_check function since the PSQL
+-- console doesn't make it easy to deal with bytea items.
+create or replace function otut_check_test() returns setof int as '
+declare
+        s record;
+begin
+        for s in select otut from otuts loop
+            return next otut_check(s.otut);
+        end loop;
+        return;
+end' language plpgsql;
+
+create or replace function otut_check(bytea) returns int as'
+declare
+        o alias for $1;
+        n int;
+begin
+        select into n rem_usage from otuts where otut = o;
+        if not found then
+           return 0;
+        else
+           return n;
+        end if;
+end' language plpgsql;
+
+grant execute on function otut_check(bytea) to teambox_otut;
+
+-- Store an OTUT string for later retrieval.
+create or replace function otut_put(bytea, bigint, int, int) returns void as '
+declare
+        o  alias for $1;
+        md alias for $2;
+        ru alias for $3;
+        ra alias for $4;
+begin
+        perform 1 from otuts where otut = o;
+        if found then
+                raise exception ''OTUT found in the database.'';
+        else
+                insert into otuts (otut, time, mid, rem_usage, rem_attempts)
+                values (o, now(), md, ru, ra);
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function otut_put(bytea, bigint, int, int) to teambox_otut;
+
+create or replace function otut_clean() returns void as '
+begin
+	delete from otuts where time < now()-''1 month''::interval;
+end' language plpgsql SECURITY DEFINER;
+
+grant execute on function otut_clean() to teambox_cleaner;
+

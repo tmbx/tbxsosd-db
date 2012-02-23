@@ -1,0 +1,13 @@
+#!/bin/sh
+
+export ROOT=./
+
+[ "$UID" != "0" ] && exit 1
+
+sudo -v
+sudo ./install_db.sh
+sudo ./install_api.sh
+./install_local_user.sh
+
+
+

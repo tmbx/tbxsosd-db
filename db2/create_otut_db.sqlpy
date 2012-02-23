@@ -1,0 +1,34 @@
+-- otut_db_kos.sql --- OTUT database structure.
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnotable(ticket_cache) >>>
+create table ticket_cache (        
+        member_id bigint primary key,
+        time      timestamp,
+        -- IP address of the last person that demanded the ticket.
+        addr      inet
+) without oids;
+
+<<< isnotable(otuts) >>>
+create table otuts (
+        -- The OTUT string itself.
+        otut         bytea PRIMARY KEY,
+        -- Time at which the OTUT was added.
+        time         timestamp,  
+        -- The MID that allocated the OTUT.
+        mid          bigint,
+        -- The number of replies remaining for this OTUT.
+        rem_usage    int,
+        -- The number of packaging attempts remaining.
+        rem_attempts int
+) without oids;
+
+<<< isnotype(otut_data) >>>
+create type otut_data as (
+       rem_usage      int,
+       rem_attempts   int
+);
+
+

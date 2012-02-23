@@ -1,0 +1,7 @@
+PostgreSQL configuration:
+
+- in postgresql.conf
+  - Enable TCP/IP, listening on the interfaces needed to replications.
+
+- in pg_hba.conf:
+  - Enable access to the database to all node, user tbxsosd-slony, database tbxsosd-db  

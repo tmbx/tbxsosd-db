@@ -1,0 +1,313 @@
+-- login_db_proc.sql --- User login/password handling functions. -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+create or replace function get_seats_allocation(bigint) returns int as '
+declare
+        oid alias for $1;        
+        n int;
+begin
+        select into n num from login_seats_allocation where org_id = oid;
+        if not found then
+           return -1;
+        end if;
+        return n;
+end' language plpgsql;
+
+grant execute on function get_seats_allocation(bigint) to teambox;
+grant execute on function get_seats_allocation(bigint) to teambox_admin;
+
+create or replace function get_reseller_seats_allocation(bigint) returns int as '
+declare
+        oid alias for $1;
+        n int;
+begin
+        select into n sum(num) from login_seats_allocation where parent_org_id = oid;
+        if not found then
+           return void;
+        end if;
+        return n;
+end' language plpgsql;
+
+grant execute on function get_reseller_seats_allocation(bigint) to teambox;
+grant execute on function get_reseller_seats_allocation(bigint) to teambox_admin;
+
+-- Sets the number of allocated seats from parent_org_id to org_id
+-- usage: set_seats_allocation(parent_org_id, org_id, num)
+create or replace function set_seats_allocation(bigint, bigint, int) returns void as '
+declare
+        poid alias for $1;
+        oid alias for $2;
+        number alias for $3;
+        dummy int;
+begin
+        select into dummy 1 from login_seats_allocation
+                where ((poid IS NULL AND parent_org_id IS NULL) or parent_org_id = poid) and org_id = oid;
+        if found then
+                update login_seats_allocation set num=number
+                        where ((poid IS NULL AND parent_org_id IS NULL) or parent_org_id = poid) and org_id = oid;
+        else
+                insert into login_seats_allocation (parent_org_id, org_id, num) values (poid, oid, number);
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function set_seats_allocation(bigint, bigint, int) to teambox_admin;
+
+-- free used login seat
+-- usage: free_login_seat(org_id, username)
+create or replace function free_login_seat(bigint, varchar) returns void as '
+declare
+        oid alias for $1;
+        uname alias for $2;
+        dummy int;
+begin
+        select into dummy 1 from login_seats where org_id = oid and user_name = uname;
+        if found then
+                delete from login_seats where org_id = oid and user_name = uname;
+        else
+                raise exception ''username % in organization % not found'', uname, oid;
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function free_login_seat(bigint, varchar) to teambox_admin;
+
+create or replace function login_count_seats(bigint) returns int as '
+declare
+        oid alias for $1;
+        s int;
+        c int;
+        rk record;
+begin
+        s := 0;
+        -- Count all seats allocated to this KDN.
+        select into c count(*) from login_seats where org_id = oid;
+        s := s + c;
+        for rk in select org_id from login_seats where parent_org_id = oid group by org_id loop
+            select into c * from login_count_seats(rk.org_id);
+            s := s + c;
+        end loop;
+        return s;        
+end' language plpgsql;
+
+grant execute on function login_count_seats(bigint) to teambox_login;
+
+-- Add a seat for an user.
+-- DEPRECATED: I'm not sure if it this is in use anywhere.
+create or replace function login_reserve_seat(varchar, bigint, bigint) returns void as '
+declare
+        uid  alias for $1;
+        oid  alias for $2;
+        poid alias for $3;
+begin
+        insert into login_seats (user_name, org_id, parent_org_id) values (uid, oid, poid);
+end' language plpgsql;
+
+grant execute on function login_reserve_seat(varchar, bigint, bigint) to teambox_login;
+
+-- Add a seat for an user.
+create or replace function login_add_seat(varchar, varchar, varchar) returns void as '
+declare
+       username alias for $1;
+       org_name alias for $2;
+       porg_name alias for $3;
+       poid bigint;
+       oid bigint;
+begin
+       if not org_name is null then
+          select into oid org_id from organization where name = org_name;
+          if not found then
+             raise exception ''% not found'', org_name;
+          end if;
+       end if;
+       if not porg_name is null then
+          select into poid org_id from organization where name = porg_name;
+          if not found then
+             raise exception ''% not found'', porg_name;
+          end if;
+       end if;
+       insert into login_seats values (username, oid, poid);
+end' language plpgsql;
+
+grant execute on function login_add_seat(varchar, varchar, varchar) to teambox_login;
+
+create or replace function login_has_seat(varchar) returns boolean as '
+declare
+        username alias for $1;
+begin
+        perform * from login_seats where user_name = username;
+        if not found then
+           return false;
+        else
+           return true;
+        end if;
+end' language plpgsql;
+
+grant execute on function login_has_seat(varchar) to teambox_login;
+
+create or replace function login_add_slot(varchar, varchar) returns void as '
+declare
+        username alias for $1;
+        token alias for $2;
+begin
+        insert into login_slots values (username, token);
+end' language plpgsql;
+
+grant execute on function login_add_slot(varchar, varchar) to teambox_login;
+
+create or replace function login_has_slot(varchar) returns boolean as '
+declare
+        username alias for $1;
+begin
+        perform * from login_slots where user_name = username;
+        if not found then
+           return false;
+        else
+           return true;
+        end if;
+end' language plpgsql;
+
+grant execute on function login_has_slot(varchar) to teambox_login;
+
+-- Save username and token after a successful external login.
+create or replace function login_external(varchar, varchar, bigint) returns login_data as '
+declare
+        uid alias for $1;
+        random_token alias for $2;
+        oid alias for $3;
+        c login_data;
+        dummy int;
+        tkn varchar;
+begin
+        select into tkn token from login_slots where user_name = uid;
+        if not found then
+           tkn = random_token;
+           insert into login_slots values (uid, tkn);
+        end if;
+        -- Check if the use has a seat.
+        perform * from login_seats where user_name = uid;
+        if not found then
+           c.rights = 4;
+        else
+           c.rights = 0;
+        end if;
+        c.prof_id = 0; -- ignored
+        c.token = tkn;
+        return c;
+end' language 'plpgsql';
+
+grant execute on function login_external(varchar, varchar, bigint) to teambox_login;
+
+-- Database login.
+create or replace function login_password(varchar, varchar, varchar) returns login_data as '
+declare
+        uid alias for $1;
+        pwd alias for $2;
+        random_token alias for $3;
+        id int;
+        tkn varchar;
+        c login_data;
+        t record;
+begin
+        perform * from user_login where user_name = uid and passwd = pwd;
+        if found then
+           -- Get the profile ID.
+           select into t prof_id, org_id, status from user_login where user_name = uid;
+           -- Check if the use has a seat.
+           perform * from login_seats where user_name = uid;
+           if not found then
+              c.rights = 4;
+           else
+              c.rights = 0;
+           end if;
+        else
+           c.rights = 3;
+           c.prof_id = 0;
+           return c;
+        end if;
+        -- Insert the token into login_slots.
+        select into tkn token from login_slots where user_name = uid;
+        if not found then
+           tkn = random_token;
+           insert into login_slots values (uid, tkn);
+           c.token = random_token;
+        else
+           c.token = tkn;
+        end if;
+        c.prof_id = t.prof_id;
+        c.status = t.status;
+        return c;
+exception
+        when raise_exception then
+           c.rights = 3;
+           c.prof_id = 0;
+           return c;
+end' language plpgsql;
+
+grant execute on function login_password(varchar, varchar, varchar) to teambox_login;
+
+create or replace function login_token(varchar, varchar) returns login_data as '
+declare
+        dummy int;
+        uid alias for $1;
+        tkn alias for $2;
+        ls int;
+        ms int;
+        cs int;
+        c login_data;
+        t record;
+begin
+        select into dummy 1 from login_slots where user_name = uid and token = tkn;
+        if found then
+           -- Check if the use has a seat.
+           perform * from login_seats where user_name = uid;
+           if not found then
+              c.rights = 4;
+           else
+              c.rights = 0;
+           end if;
+           c.token = tkn;
+           select into t prof_id, org_id from user_login where user_name = uid;
+           if found then
+              c.prof_id = t.prof_id;
+              c.org_id = t.org_id;
+           end if;
+           return c;       
+        end if;
+        c.rights = 3;
+        return c;
+end' language plpgsql;
+
+grant execute on function login_token(varchar, varchar) to teambox_login;
+
+create or replace function add_login(varchar, varchar, bigint, bigint) returns void as '
+declare
+        un  alias for $1;
+        pw  alias for $2;        
+        pid alias for $3;
+        oid alias for $4;
+begin
+        insert into user_login (user_name, passwd, prof_id, org_id, status)
+                values (un, pw, pid, oid, ''A'');
+        return;
+end' language plpgsql;
+
+grant execute on function add_login(varchar, varchar, bigint, bigint) to teambox_login;
+
+create or replace function del_login(varchar) returns void as '
+declare
+        dummy int;
+        un alias for $1;
+begin
+        select into dummy 1 from user_login where user_name = un;
+        if not found then
+                raise exception ''% not found'', un;
+        end if;
+        delete from user_login where user_name = un;
+        return;
+end' language plpgsql;
+
+grant execute on function del_login(varchar) to teambox_login;
+

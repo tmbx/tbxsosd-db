@@ -1,0 +1,19 @@
+# Drop the database if required.
+<<< isset(drop), isdb(tbxsosd_db), print(Dropping database tbxsosd_db.), dropdb(tbxsosd_db) >>>
+
+# Exit if we don't need to create the database.
+<<< isnotset(create), exit() >>>
+
+# Create the database if required.
+<<< isnodb(tbxsosd_db), print(Creating database tbxsosd_db.), createdb(tbxsosd_db) >>>
+
+# Exit if we don't need to create the schema.
+<<< isset(noschema), exit() >>>
+
+# Connect to the database.
+<<< connect(tbxsosd_db) >>>
+
+# Create the plpgsql language if required.
+<<< isnolang(plpgsql), print(Creating language plpgsql.) >>>
+CREATE LANGUAGE plpgsql;
+

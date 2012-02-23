@@ -1,0 +1,41 @@
+#!/bin/sh
+
+set -e
+set -- `getopt "r:p:vn" "$@"`
+
+PORT=5432
+ROOT="./api2"
+VERBOSE=""
+PSQL_VERBOSE=""
+
+while [ ! -z "$1" ]; do
+    case "$1" in
+        -r) ROOT=$2;;
+        -p) PORT=$2;;
+        -v) VERBOSE="-d"
+            PSQL_VERBOSE="-e";;
+    esac
+    shift
+done
+
+# Neat hack to simply drop all functions from the database.
+psql -t -p $PORT -d tbxsosd_db -c '\df' -A | \
+    grep ^public | \
+    awk -F '|' '{printf "drop function if exists %s(%s) cascade;\n", $2, $4}' | \
+    psql $PSQL_VERBOSE -1 -d tbxsosd_db
+
+# Neat hack to simply drop all grants done on tables of the database.
+S="select grantee, table_name from information_schema.role_table_grants where table_schema = 'public' and grantee != 'postgres' group by grantee, table_name order by grantee, table_name;"
+psql -t -p $PORT -d tbxsosd_db -c "$S" -A | \
+    awk -F '|' '{printf "revoke all on %s from %s;\n", $2, $1}' | \
+    psql $PSQL_VERBOSE -1 -d tbxsosd_db
+
+# Less neat hack to drop grants on sequences
+S="select relname,btrim(relacl::varchar, '{}') from pg_class where relkind = 'S' and relacl::varchar like '%teambox%'"
+psql -t -p $PORT -d tbxsosd_db -c "$S" -A | \
+    perl -lWne 'chop and ($v, @u) = split(/,|\|/) and map { s/=[a-zA-Z\/]*// and print "revoke all on $v from $_;" unless /postgres/ } @u' | \
+    psql $PSQL_VERBOSE -1 -d tbxsosd_db
+
+kexecpg $VERBOSE -p $PORT $ROOT/drop_users.sqlpy
+kexecpg $VERBOSE -p $PORT $ROOT/drop_groups.sqlpy
+kexecpg $VERVOSE -p $PORT $ROOT/drop_misc.sqlpy

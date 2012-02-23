@@ -1,0 +1,41 @@
+#!/bin/sh
+# postinst script for #PACKAGE#
+#
+# see: dh_installdeb(1)
+
+set -e
+
+. /usr/share/debconf/confmodule || exit 0
+
+db_version 2.0
+db_title "tbxsosd database"
+
+case "$1" in
+    configure)
+        db_get tbxsosd-db2-db/init_db || true
+
+        if [ "$RET" = "true" ]; then
+            # If the cluster isn't running, then don't try to initialize the database
+            if pg_lsclusters -h | grep -E -q "8.3.*teambox.*online" >/dev/null; then
+                ROOT="/usr/share/tbxsosd-db/db2"
+                su postgres -c "/usr/share/tbxsosd-db/install_db -r $ROOT" >/dev/null
+            else
+                echo "Not running database installation script. Run dpkg-reconfigure tbxsosd-db2-db."
+            fi
+        else
+            echo "Never running database configuration scripts. I hope you know what you are doing."
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

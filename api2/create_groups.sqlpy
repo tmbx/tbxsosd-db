@@ -1,0 +1,42 @@
+-- groups.sql --- Database access groups. -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnorole(teambox) >>>
+create role teambox nosuperuser nocreatedb nocreaterole noinherit nologin;
+
+-- one group per database.
+
+<<< isnorole(teambox_event) >>>
+create role teambox_event nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_login) >>>
+create role teambox_login nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_otut) >>>
+create role teambox_otut nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_privkeys) >>>
+create role teambox_privkeys nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_profiles) >>>
+create role teambox_profiles nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_pubkeys) >>>
+create role teambox_pubkeys nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_cleaner) >>>
+create role teambox_cleaner nosuperuser nocreatedb nocreaterole inherit nologin in role teambox;
+
+<<< isnorole(teambox_admin) >>>
+-- the admin user, used by kctl. member of every groups. it should be a group,
+-- but kctl depend on that user name.
+create role teambox_admin nosuperuser nocreatedb nocreaterole inherit login connection limit 6 
+       in role 
+          teambox_event, teambox_login, teambox_otut, teambox_privkeys, teambox_profiles, teambox_pubkeys;
+
+<<< isnorole(tbxsosd) >>>
+create role tbxsosd nosuperuser nocreatedb nocreaterole inherit login 
+       in role
+          teambox_event, teambox_login, teambox_otut, teambox_privkeys, teambox_profiles, teambox_pubkeys;

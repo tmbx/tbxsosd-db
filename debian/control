@@ -1,0 +1,15 @@
+Source: tbxsosd-db
+Section: teambox-internal
+Priority: optional
+Maintainer: Teambox Packages
+Build-Depends: debhelper (>= 4), debconf (> 1.0) | debconf-2.0
+Standards-Version: 3.7.2
+
+Package: tbxsosd-db
+Architecture: all
+Section: teambox-any
+Depends: postgresql-client (>= 8.2), postgresql-common, kpython (>= 18)
+Description: tbxsosd database structure
+ tbxsosd database.
+ .
+ Include the database structure.

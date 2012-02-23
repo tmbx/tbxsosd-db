@@ -1,0 +1,55 @@
+-- keys_db.sql --- Key table for single-DB setup.
+-- Copyright (C) 2005-2012 Opersys inc.  All rights reserved.
+
+-- Author: François-Denis Gonthier
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnotype(key_data) >>>
+create type key_data as (
+       key_id     bigint,
+       owner_name varchar(255),
+       key_data   varchar
+);
+
+<<< isnotable(keys) >>>
+create table keys (
+       key_id     bigint,
+       key_type   varchar,
+       constraint key_type_check check (key_type = 'sig_pkey' 
+                                     or key_type = 'sig_skey' 
+                                     or key_type = 'enc_skey'
+                                     or key_type = 'enc_pkey'),
+       key_data   varchar,
+       owner_name varchar,
+       primary key (key_id, key_type)
+);
+<<< end() >>>
+
+create or replace view skey_view as
+    select (case 
+            when (select count(*) from keys as k0
+                  where (k0.key_type = 'sig_skey' or k0.key_type = 'enc_skey')
+                         and k0.key_id = k.key_id) = 2 then 'Sig/Enc' 
+            when (select count(*) from keys as k0
+                  where k0.key_type = 'sig_skey' and k0.key_id = k.key_id) = 1 then 'Sig'
+            when (select count(*) from keys as k0
+                  where k0.key_type = 'enc_skey' and k0.key_id = k.key_id) = 1 then 'Enc'
+            end)
+           as has_keys, k.key_id, k.owner_name
+           from keys as k
+           group by key_id, owner_name;
+
+create or replace view pkey_view as
+    select (case 
+            when (select count(*) from keys as k0
+                  where (k0.key_type = 'sig_pkey' or k0.key_type = 'enc_pkey')
+                         and k0.key_id = k.key_id) = 2 then 'Sig/Enc' 
+            when (select count(*) from keys as k0
+                  where k0.key_type = 'sig_pkey' and k0.key_id = k.key_id) = 1 then 'Sig'
+            when (select count(*) from keys as k0
+                  where k0.key_type = 'enc_pkey' and k0.key_id = k.key_id) = 1 then 'Enc'
+            end)
+           as has_keys, k.key_id, k.owner_name
+           from keys as k
+           group by key_id, owner_name;

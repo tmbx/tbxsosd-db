@@ -1,0 +1,6 @@
+#!/bin/sh
+# 
+# Periodically cleanup events that are older than 15 days.
+
+SQL="select event_clean(15)"
+su postgres -c "psql -d tbxsosd_db -c '${SQL}'" >/dev/null 2>&1

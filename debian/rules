@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+export DH_VERBOSE=1
+
+clean:
+	dh_testdir
+	dh_testroot
+	dh_clean
+
+build:
+# Nothing to do here.
+
+install:
+	dh_testdir
+	mkdir -p debian/tbxsosd-db/etc/teambox/base-config/
+	cp db2/create_db.sqlpy debian/tbxsosd-db/etc/teambox/base-config/tbxsosd_db.sqlpy
+	for file in event keys profiles login otut; do \
+	    cat db2/create_$${file}_db.sqlpy >> debian/tbxsosd-db/etc/teambox/base-config/tbxsosd_db.sqlpy; \
+	done
+	for file in groups users grants event_proc login_proc otut_proc keys_proc profiles_proc; do \
+	    cat api2/create_$${file}.sqlpy >> debian/tbxsosd-db/etc/teambox/base-config/tbxsosd_db.sqlpy; \
+	done
+
+binary-indep-db2-api: install
+	dh_testdir
+	dh_testroot 
+	dh_installdirs 
+	dh_install 
+	dh_installdebconf 
+	dh_installdocs 
+	dh_installcron 
+	dh_compress 
+	dh_fixperms 
+	dh_installdeb 
+	dh_gencontrol 
+	dh_md5sums 
+	dh_builddeb 
+
+binary-indep: binary-indep-db2-api binary-indep-db2-db
+binary: binary-indep
+.PHONY: binary binary-indep binary-indeb-db2-api binary-indep-db2-db

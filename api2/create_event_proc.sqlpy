@@ -1,0 +1,138 @@
+-- event_db_proc.sql --- Event logging functions. -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+-- Add an event to the database.
+create or replace function event_create(varchar, bigint, bigint, varchar) returns bigint as '
+declare
+        hn alias for $1;
+        evid alias for $2;
+        sess_id alias for $3;
+        name alias for $4;        
+        n bigint;
+begin
+        perform * from events where hostname = hn and event_id = evid and session_id = sess_id;
+        if found then
+           raise exception ''Event ID % of session ID % already exists.'', evid, sess_id;
+        end if;
+        insert into events (hostname, event_name, event_id, session_id, event_time) 
+               values (hn, name, evid, sess_id, now());
+        select into n last_value from event_id_seq;
+        return n;     
+end' language plpgsql;
+
+grant execute on function event_create(varchar, bigint, bigint, varchar) to teambox_event;
+
+-- Add a variable to the event.
+create or replace function event_add_variable(varchar, bigint, bigint, varchar, varchar) returns void as '
+declare
+        hn alias for $1;
+        evid alias for $2;
+        seid alias for $3;
+        key  alias for $4;
+        val  alias for $5;
+        dummy int;
+begin
+        insert into event_variables (hostname, event_id, session_id, var_key, var_val)
+               values (hn, evid, seid, key, val);
+        return;
+end' language plpgsql;
+
+grant execute on function event_add_variable(varchar, bigint, bigint, varchar, varchar) to teambox_event;
+
+-- To be called to periodically clean up the events.
+create or replace function event_clean(int) returns void as '
+declare
+        days alias for $1;
+        r_ev record;
+        c_ev refcursor;
+begin
+        open c_ev for select * from events;
+        loop
+            fetch c_ev into r_ev;
+            exit when not found;
+            if date_part(''day'', now() - r_ev.event_time) > days then
+               delete from event_variables 
+                      where session_id = r_ev.session_id and event_id = r_ev.event_id;
+               delete from events where 
+                      session_id = r_ev.session_id and event_id = r_ev.event_id;
+            end if;
+        end loop;
+        close c_ev;
+        return;
+end' language plpgsql;
+
+-- events2 view
+-- change column names for subselects
+-- select event_id, (select ... where event_id=event_id ...) does not work
+-- select event_id as ttt, (select ... where event_id=ttt ...) does not work
+-- select eid, (select ... where event_id=eid...) works
+create or replace view events2 (sid, eid, ename, etime)
+ as select session_id, event_id, event_name, event_time
+ from events;
+
+grant all on table events2 to teambox_admin;
+
+-- packagings view
+-- yeah..
+create or replace view packagings
+ (conntime, packtime, disconntime, ip, username, pkg_type, nb_recipient, nb_pwd, nb_attch, body_text_len,
+  body_html_len, attach_total_size, output_len)
+ as select 
+  (select event_time from events where session_id=sid and event_name='connect') as conntime,
+  etime,
+  (select event_time from events where session_id=sid and event_name='disconnect') as disconntime,
+  (select event_variables.var_val from event_variables
+    left join events
+    on events.event_id=event_variables.event_id
+    where events.session_id=sid and var_key='ip' limit 1) as ip,
+  (select event_variables.var_val from event_variables
+    left join events
+    on events.event_id=event_variables.event_id
+    where events.session_id=sid and var_key='username' limit 1) as username,
+  (select var_val from event_variables where event_id=eid and var_key='pkg_type' limit 1) as pkg_type,
+  (select var_val from event_variables where event_id=eid and var_key='nb_recipient' limit 1) as nb_recipient,
+  (select var_val from event_variables where event_id=eid and var_key='nb_pwd' limit 1) as nb_pwd,
+  (select var_val from event_variables where event_id=eid and var_key='nb_attch' limit 1) as nb_attch,
+  (select var_val from event_variables where event_id=eid and var_key='body_text_len' limit 1) as body_text_len,
+  (select var_val from event_variables where event_id=eid and var_key='body_html_len' limit 1) as body_html_len,
+  (select var_val from event_variables where event_id=eid and var_key='attach_total_size' limit 1) as attach_total_size,
+  (select var_val from event_variables where event_id=eid and var_key='output_len' limit 1) as output_len
+ from events2
+ where ename='pkg';
+
+grant all on table packagings to teambox_admin;
+
+-- processings view
+-- yeah.. 
+create or replace view processings
+ (conntime, packtime, disconntime, ip, username, pkg_type, key_id, has_pwd)
+ as select 
+  (select event_time from events where session_id=sid and event_name='connect') as conntime,
+  etime,
+  (select event_time from events where session_id=sid and event_name='disconnect') as disconntime,
+  (select event_variables.var_val from event_variables
+    left join events
+    on events.event_id=event_variables.event_id
+    where events.session_id=sid and var_key='ip' limit 1) as ip,
+  (select event_variables.var_val from event_variables
+    left join events
+    on events.event_id=event_variables.event_id
+    where events.session_id=sid and var_key='username' limit 1) as username,
+  (select var_val from event_variables where event_id=eid and var_key='pkg_type' limit 1) as pkg_type,
+  (select var_val from event_variables where event_id=eid and var_key='key_id' limit 1) as key_id,
+  (select var_val from event_variables where event_id=eid and var_key='has_pwd' limit 1) as has_pwd
+ from events2
+ where ename='key-dpkg';
+
+grant all on table processings to teambox_admin;
+
+create or replace view today_events as
+ select e.hostname, e.event_id, e.session_id, e.event_name, e.event_time, v.var_key, v.var_val
+   from events e
+   left join event_variables v 
+        on e.event_id = v.event_id and e.session_id = v.session_id and e.hostname::text = v.hostname::text
+  where (now() - e.event_time::timestamp with time zone) < '1 day'::interval;
+
+grant all on table today_events to teambox_admin;

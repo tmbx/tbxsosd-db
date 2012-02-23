@@ -1,0 +1,46 @@
+-- event_db.sql --- Event logging data structure.
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnotype(event_id_seq) >>>
+create sequence event_id_seq;
+
+<<< isnotype(event_var_id_seq) >>>
+create sequence event_var_id_seq;
+
+<<< isnotable(events) >>>
+-- Time at which an event happened.
+create table events (
+       hostname   varchar not null,
+       event_id   bigint,
+       session_id bigint,
+       event_name varchar not null,
+       event_time timestamp,
+       primary key (hostname, event_id, session_id)
+) without oids;
+
+<<< isnotable(event_variables) >>>
+-- Variables to add to the event.
+create table event_variables (
+       var_id bigint default nextval('event_var_id_seq'),
+       hostname      varchar not null,
+       event_id      bigint,
+       session_id    bigint,
+       var_key       varchar not null,
+       var_val       varchar,
+       primary key   (var_id, event_id, session_id),
+       foreign key (hostname, session_id, event_id) references events (hostname, session_id, event_id)
+) without oids;
+
+<<< isnoindex(event_var_id_idx) >>>
+create index event_var_id_idx on event_variables (event_id);
+
+<<< isnoindex(session_var_id_idx) >>>
+create index session_var_id_idx on event_variables (session_id); 
+
+<<< isnoindex(event_id_idx) >>>
+create index event_id_idx on events (event_id);
+
+<<< isnoindex(session_id_idx) >>>
+create index session_id_idx on events (session_id);

@@ -1,0 +1,9 @@
+Template: tbxsosd-db2-db/init_db
+Type: boolean
+Default: true
+Description: Automatically run database scripts
+ Do you want to automatically run database scripts when updated
+ packages are installed.
+ .
+ Do not say 'yes' if you run a site replicated by Slony-I or if
+ you simply want to take control of updates.

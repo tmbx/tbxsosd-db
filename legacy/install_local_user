@@ -1,0 +1,10 @@
+#!/bin/sh
+
+PPORT=""
+[ ! -z $PORT ] && PPORT="-p $PORT"
+
+# Allow access to the local user.
+sudo -u postgres \
+    psql -d tbxsosd_db $PPORT -c "create role \"${USER}\" login;" 
+sudo -u postgres \
+    psql -d tbxsosd_db $PPORT -c "grant teambox_admin to \"${USER}\"; grant teambox to \"${USER}\";"

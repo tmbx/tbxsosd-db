@@ -1,0 +1,14 @@
+-- -*- sql -*- 
+
+<<< connect(tbxsosd_db) >>>
+
+drop role if exists tbxsosd_slony;
+drop role if exists user_event;
+drop role if exists user_login;
+drop role if exists user_otut;
+drop role if exists user_privkeys;
+drop role if exists user_profiles;
+drop role if exists user_pubkeys;
+drop role if exists user_admin;
+drop role if exists user_cleaner;
+

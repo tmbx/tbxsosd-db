@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -e
+set -- `getopt "r:p:vn" "$@"`
+
+PORT=5432
+ROOT="./api2"
+
+while [ ! -z "$1" ]; do
+    case "$1" in
+        -r) ROOT=$2;;
+        -p) PORT=$2;;
+    esac
+    shift
+done
+
+dropdb -p $PORT tbxsosd_db

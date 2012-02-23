@@ -1,0 +1,27 @@
+#!/bin/sh
+
+set -- `getopt "r:p:vn" "$@"`
+
+PORT=5432
+ROOT="./api2"
+VERBOSE=""
+NOACT=""
+
+while [ ! -z "$1" ]; do
+    case "$1" in
+        -r) ROOT=$2;;
+        -p) PORT=$2;;
+        -v) VERBOSE="-d";;
+        -n) NOACT="-n";;
+    esac
+    shift
+done
+
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_groups.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_users.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_grants.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_event_proc.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_login_proc.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_otut_proc.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_keys_proc.sqlpy
+kexecpg $NOACT $VERBOSE -p $PORT $ROOT/create_profiles_proc.sqlpy

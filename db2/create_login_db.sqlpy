@@ -1,0 +1,66 @@
+-- login_db.sql --- User login database structure.
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnotype(login_data) >>>
+create type login_data as (
+       rights    int,
+       prof_id   bigint,
+       org_id    bigint,
+       status    char,
+       token     varchar
+);
+
+<<< isnotable(login_seats_allocation) >>>
+create table login_seats_allocation (
+       parent_org_id bigint,
+       org_id        bigint,
+       num           int
+) without oids;
+
+<<< isnotable(login_seats) >>>
+create table login_seats (
+       user_name     varchar,
+       org_id        bigint,
+       parent_org_id bigint
+) without oids;
+
+-- Added in ~7.
+alter table login_seats add unique (user_name);
+alter table login_seats add foreign key (org_id) references organization (org_id);
+alter table login_seats add foreign key (parent_org_id) references organization (org_id);
+
+<<< isnotable(login_slots) >>>
+create table login_slots (
+       user_name varchar(320) primary key,
+       token     varchar
+) without oids;
+
+-- Added in ~7.
+alter table login_slots add unique (user_name);
+
+<<< isnotable(user_login) >>>
+create table user_login (
+       -- fixme: should be 'username'
+       user_name varchar(320) primary key,
+       -- fixme: consider using an md5 hash to check the password.
+       passwd    varchar(50)  not null,
+       prof_id   bigint       not null,
+       org_id    bigint       not null,
+       status    char         not null
+) without oids;
+<<< end() >>>
+
+create or replace view login_view as
+        select org_id, prof_id, user_name, passwd from user_login;
+
+-- Developed for version ~7.
+
+create or replace view login_slots_view as
+        select ls.user_name as username, ls.token from login_slots as ls;
+
+create or replace view login_seats_view as
+       select ls.user_name as username, o.name as org_name, o2.name as parent_org_name 
+       from login_seats as ls left join organization as o on (ls.org_id =o.org_id) 
+                              left join organization as o2 on (ls.parent_org_id = o2.org_id);

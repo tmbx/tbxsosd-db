@@ -1,0 +1,14 @@
+-- -*- sql -*-
+
+<<< connect(tbxsosd_db) >>>
+
+drop role if exists teambox;
+drop role if exists teambox_event;
+drop role if exists teambox_login;
+drop role if exists teambox_otut;
+drop role if exists teambox_privkeys;
+drop role if exists teambox_profiles;
+drop role if exists teambox_pubkeys;
+drop role if exists teambox_cleaner;
+drop role if exists teambox_admin;
+drop role if exists tbxsosd;

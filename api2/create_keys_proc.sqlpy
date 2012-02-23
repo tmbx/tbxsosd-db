@@ -1,0 +1,61 @@
+-- keys_proc.sql --- Functions for handling keys in single-DB setup. -*- sql -*-
+-- Copyright (C) 2005-2012 Opersys inc.  All rights reserved.
+
+-- Author: François-Denis Gonthier
+
+<<< connect(tbxsosd_db) >>>
+
+create or replace function import_key(text, bigint, varchar, varchar) returns void as '
+declare
+        typ alias for $1;
+        kid alias for $2;
+        owner alias for $3;
+        data alias for $4;
+        dummy int;
+begin
+        select into dummy 1 from keys where key_id = kid and key_type = typ;
+        if found then
+                update keys set owner_name = owner, key_data = data 
+                       where key_id = kid and key_type = typ;
+        else
+                insert into keys values (kid, typ, data, owner);
+        end if;
+        return;
+end' language plpgsql;
+
+grant execute on function import_key(text, bigint, varchar, varchar) to teambox_admin;
+
+create or replace function export_key(text, bigint) returns key_data as '
+declare
+        typ alias for $1;
+        kid alias for $2;
+        k   record;
+        kd  key_data;
+begin
+        select into k owner_name, key_id, key_data from keys
+               where key_id = kid and key_type = typ;
+        kd.key_id = k.key_id;
+        kd.key_data = k.key_data;
+        kd.owner_name = k.owner_name;
+        return kd;
+end' language plpgsql;
+
+grant execute on function export_key(text, bigint) to teambox_admin;
+grant execute on function export_key(text, bigint) to teambox_pubkeys;
+grant execute on function export_key(text, bigint) to teambox_privkeys;
+
+-- Remove a key (all occurences within the database).
+create or replace function del_key(bigint) returns void as '
+declare
+        kid alias for $1;
+        dummy text;
+begin
+        perform key_id from keys where key_id = kid;
+        if not found then
+                raise exception ''Key % not found'', kid;
+        end if;
+        delete from keys where key_id = kid;
+        return;
+end' language plpgsql;
+
+grant execute on function del_key(bigint) to teambox_admin;

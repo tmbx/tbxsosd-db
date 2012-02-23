@@ -1,0 +1,181 @@
+-- profiles_db.sql --- Master data structure for user handling.
+-- Copyright (C) 2005-2012 Opersys inc., All rights reserved.
+
+<<< connect(tbxsosd_db) >>>
+
+<<< isnotype(org_id_seq) >>>
+create sequence org_id_seq;
+
+<<< isnotype(prof_id_seq) >>>
+create sequence prof_id_seq;
+
+<<< isnotype(user_id_seq) >>>
+create sequence user_id_seq;
+
+<<< isnotype(group_id_seq) >>>
+create sequence group_id_seq;
+
+<<< isnotype(email_id_seq) >>>
+create sequence email_id_seq;
+
+<<< isnotype(email_part_id_seq) >>>
+create sequence email_part_id_seq;
+
+<<< isnotype(ldap_group_id_seq) >>>
+create sequence ldap_group_id_seq;
+
+<<< isnotable(organization) >>>
+-- Organization management
+create table organization (
+       org_id     bigint primary key default nextval('org_id_seq'),
+       name       varchar(200),
+       -- All encrypted mail packaged by this organization will be
+       -- sent to that address if the KPS is configured so.
+       forward_to varchar,
+       -- License determining what the user in that organization have
+       -- to right to do on the KPS.
+       license    varchar,
+       -- Used by the web interface.
+       status     int
+) without oids;
+
+<<< isnotable(profiles) >>>
+-- Main table for accounts management
+create table profiles (
+       -- Those items should never be 0 at any costs.
+       prof_id     bigint primary key default nextval('prof_id_seq')
+                   constraint profiles_profid_check check(prof_id != 0),
+       key_id      bigint 
+                   constraint profiles_keyid_check check(key_id != 0),
+       org_id      bigint not null
+                   constraint profiles_orgid_check check(org_id != 0),
+       prof_type   text 
+                   constraint profiles_prof_type_check check(prof_type = 'G' or prof_type = 'U'),
+       user_id     bigint,
+       group_id    bigint,   
+       status      int,
+       created_on  timestamp default now(),
+       note        varchar,
+       foreign key (org_id) references organization (org_id),
+
+       -- Make sure we have user_id XOR group_id
+       check ((prof_type = 'G' and user_id is null) or
+              (prof_type = 'U' and group_id is null))
+) without oids;
+
+<<< isnotable(user_profiles) >>>
+create table user_profiles (
+       -- This should not be null either so we can count on the fact
+       -- that there is no profile at ID 0
+       user_id    bigint primary key default nextval('user_id_seq')
+                  constraint user_profiles_userid_check check (user_id != 0),
+       first_name varchar(100),
+       last_name  varchar(100),
+       status     char not null,
+       -- This will never be 0 since it is linked to the profiles
+       -- database.
+       prof_id    bigint not null,
+       foreign key (prof_id) references profiles (prof_id)
+) without oids;       
+
+-- Added in version 2~1, type and default modified in version 2~4
+<<< isnofield(profiles, created_on) >>>
+alter table profiles add column created_on timestamp;
+<<< end() >>>
+alter table profiles alter column created_on type timestamp;
+alter table profiles alter column created_on set default now();
+
+--- Added in version 2~1
+<<< isnofield(profiles, note) >>>
+alter table profiles add column note varchar;
+
+<<< isnotable(group_profiles) >>>
+create table group_profiles (
+       -- 0 is not allowable here for the same reason that is
+       -- explained above.
+       group_id   bigint primary key default nextval('group_id_seq')
+                  constraint group_profiles_groupid_check check (group_id != 0),
+       group_name varchar(100),
+       status     char not null,
+       prof_id    bigint not null,
+       foreign key (prof_id) references profiles (prof_id)
+) without oids;
+
+<<< isnotable(ldap_groups) >>>
+-- Match between LDAP groups to a profile and key ID
+create table ldap_groups (
+       ldap_group_id bigint primary key default nextval('ldap_group_id_seq')
+                            constraint ldap_group_id_check check (ldap_group_id != 0),
+       group_dn      varchar(512) unique,
+       group_id      bigint,
+       foreign key (group_id) references group_profiles (group_id)
+) without oids;
+
+<<< isnotable(email_parts) >>>
+-- Match between partial or complete email address and a key ID.
+create table email_parts (
+       email_part_id bigint primary key default nextval('email_part_id_seq')
+                     constraint email_parts_id_check check (email_part_id != 0),
+       email_part    varchar(320) unique,
+       group_id      bigint,
+       foreign key (group_id) references group_profiles (group_id)
+) without oids;              
+
+<<< isnotable(emails) >>>
+-- Note that one account can have many email (because a user might have many email addresses)
+create table emails (
+    email_id         bigint primary key default nextval('email_id_seq')
+                     constraint email_id_check check (email_id != 0),
+    user_id          bigint not null,
+    email_address    varchar(320) not null,    -- check size
+    status           char not null,
+    is_primary       boolean not null,
+    foreign key (user_id) references user_profiles (user_id)            
+    /* todo: add unique constraint so that an email address can be primary on only one account */
+) without oids;
+<<< end() >>>
+
+-- Search view for LDAP groups
+create or replace view ldap_groups_view as
+       select profiles.prof_id as prof_id, profiles.org_id as org_id, profiles.key_id as key_id,
+              ldap_groups.group_dn as group_dn
+       from profiles 
+            inner join group_profiles on profiles.prof_id = group_profiles.prof_id
+            inner join ldap_groups on group_profiles.group_id = ldap_groups.group_id;
+
+-- Nicer view of profiles.
+create or replace view profiles_view as
+        select profiles.org_id, profiles.prof_id, 'User' as type, 
+                case when key_id is null then 'No key'
+                     else cast(key_id as text) end,
+                first_name || ' ' || last_name as name
+        from profiles inner join user_profiles
+                on user_profiles.user_id = profiles.user_id
+        union
+        select profiles.org_id, profiles.prof_id, 'Group' as type,
+                case when key_id is null then 'No key'
+                     else cast(key_id as text) end,
+                group_name as name
+        from group_profiles inner join profiles
+                on group_profiles.group_id = profiles.group_id;
+
+-- Email address search view.  Merges the group email parts and the user
+-- emails for the email_search function.
+create or replace view email_lookup as
+       select profiles.key_id, foo.prof_id, email_address
+       from (
+            select user_profiles.prof_id, emails.email_address
+            from emails inner join user_profiles 
+                 on user_profiles.user_id = emails.user_id
+            union 
+            select group_profiles.prof_id, email_parts.email_part
+            from email_parts inner join group_profiles 
+                 on group_profiles.group_id = email_parts.group_id
+       ) as foo
+       inner join profiles on foo.prof_id = profiles.prof_id;      
+
+-- List of organizations
+create or replace view organization_view as
+        select org_id, name, forward_to, status from organization;
+
+

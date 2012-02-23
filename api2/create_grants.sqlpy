@@ -1,0 +1,93 @@
+-- -*- sql -*-
+
+<<< connect(tbxsosd_db) >>>
+
+-- EVENTS
+
+grant all on table event_var_id_seq to teambox_event;
+grant all on table event_id_seq to teambox_event;
+
+grant all on table events to teambox_event;
+grant all on table event_variables to teambox_event;
+
+-- KEYS
+
+grant all on table keys to teambox_admin;
+grant select on table keys to teambox_pubkeys;
+grant select on table keys to teambox_privkeys;
+
+grant all on table skey_view to teambox_admin;
+grant all on table pkey_view to teambox_admin;
+
+-- LOGIN
+
+grant select, insert on table login_seats to teambox_login;
+grant all on table login_seats to teambox_admin;
+
+grant select on table login_seats_allocation to teambox_login;
+grant all on table login_seats_allocation to teambox_admin;
+
+grant select on table login_seats_view to teambox_login;
+grant all on table login_seats_view to teambox_admin;
+
+grant select on table login_slots_view to teambox_login;
+grant all on table login_slots_view to teambox_admin;
+
+-- This is all the rights the daemon needs.
+grant select, insert on table login_slots to teambox_login;
+grant all on table login_slots to teambox_admin;
+
+-- Only the daemon has to performs logins for now.
+grant select on table user_login to teambox_login;
+grant all on table user_login, login_view to teambox_admin;
+
+-- PROFILES
+
+grant select, update on table org_id_seq to teambox_admin;
+grant select, update on table prof_id_seq to teambox_admin;
+grant select, update on table user_id_seq to teambox_admin;
+grant select, update on table group_id_seq to teambox_admin;
+grant select, update on table email_id_seq to teambox_admin;
+grant select, update on table email_part_id_seq to teambox_admin;
+grant select, update on table ldap_group_id_seq to teambox_admin;
+
+grant all on table organization to teambox_admin;
+grant select on table organization to teambox_profiles;
+
+grant all on table profiles to teambox_admin;
+grant select on table profiles to teambox_profiles;
+
+grant all on table user_profiles to teambox_admin;
+grant select on table user_profiles to teambox_profiles;
+
+grant all on table group_profiles to teambox_admin;
+grant select on table group_profiles to teambox_profiles;
+
+grant all on table ldap_groups to teambox_admin;
+grant select on table ldap_groups to teambox_profiles;
+
+grant all on table email_parts to teambox_admin;
+grant select on table email_parts to teambox_profiles;
+
+grant all on table emails to teambox_admin;
+grant select on table emails to teambox_profiles;
+
+grant all on table ldap_groups_view to teambox_admin;
+grant select on table ldap_groups_view to teambox_profiles;
+
+grant all on table profiles_view to teambox_admin;
+grant select on table profiles_view to teambox_profiles;
+
+grant all on table email_lookup to teambox_admin;
+grant select on table email_lookup to teambox_profiles;
+
+grant all on table organization_view to teambox_admin;
+grant select on table email_lookup to teambox_profiles;
+
+-- OTUT
+
+grant select, insert, update on table ticket_cache to teambox_otut;
+grant all on table ticket_cache to teambox_admin;
+
+grant select, insert, update, delete on table otuts to teambox_otut;
+grant all on table otuts to teambox_admin;
